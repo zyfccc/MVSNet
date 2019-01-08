@@ -23,54 +23,57 @@ from preprocess import *
 from model import *
 
 # params for datasets
-tf.app.flags.DEFINE_string('dense_folder', None, 
+tf.app.flags.DEFINE_string('dense_folder', None,
                            """Root path to dense folder.""")
 # params for input
 tf.app.flags.DEFINE_integer('view_num', 5,
                             """Number of images (1 ref image and view_num - 1 view images).""")
 tf.app.flags.DEFINE_integer('default_depth_start', 1,
                             """Start depth when training.""")
-tf.app.flags.DEFINE_integer('default_depth_interval', 1, 
+tf.app.flags.DEFINE_integer('default_depth_interval', 1,
                             """Depth interval when training.""")
-tf.app.flags.DEFINE_integer('max_d', 192, 
+tf.app.flags.DEFINE_integer('max_d', 192,
                             """Maximum depth step when training.""")
-tf.app.flags.DEFINE_integer('max_w', 1152, 
+tf.app.flags.DEFINE_integer('max_w', 1152,
                             """Maximum image width when training.""")
-tf.app.flags.DEFINE_integer('max_h', 864, 
+tf.app.flags.DEFINE_integer('max_h', 864,
                             """Maximum image height when training.""")
-tf.app.flags.DEFINE_float('sample_scale', 0.25, 
-                            """Downsample scale for building cost volume (W and H).""")
-tf.app.flags.DEFINE_float('interval_scale', 0.8, 
-                            """Downsample scale for building cost volume (D).""")
-tf.app.flags.DEFINE_integer('base_image_size', 32, 
+tf.app.flags.DEFINE_float('sample_scale', 0.25,
+                          """Downsample scale for building cost volume (W and H).""")
+tf.app.flags.DEFINE_float('interval_scale', 0.8,
+                          """Downsample scale for building cost volume (D).""")
+tf.app.flags.DEFINE_integer('base_image_size', 32,
                             """Base image size to fit the network.""")
-tf.app.flags.DEFINE_integer('batch_size', 1, 
+tf.app.flags.DEFINE_integer('batch_size', 1,
                             """training batch size""")
 
 # params for config
-tf.app.flags.DEFINE_string('pretrained_model_ckpt_path', 
-                           '/data/dtu/tf_model/mvsnet_arxiv/model.ckpt',
+tf.app.flags.DEFINE_string('pretrained_model_ckpt_path',
+                           './model/model.ckpt',
                            """Path to restore the model.""")
 tf.app.flags.DEFINE_integer('ckpt_step', 70000,
                             """ckpt step.""")
 FLAGS = tf.app.flags.FLAGS
 
+
 class MVSGenerator:
     """ data generator class, tf only accept generator without param """
+
     def __init__(self, sample_list, view_num):
         self.sample_list = sample_list
         self.view_num = view_num
         self.sample_num = len(sample_list)
         self.counter = 0
-    
+
     def __iter__(self):
         while True:
-            for data in self.sample_list: 
-                
+            for data in self.sample_list:
+
                 # read input data
                 images = []
                 cams = []
-                image_index = int(os.path.splitext(os.path.basename(data[0]))[0])
+                image_index = int(os.path.splitext(
+                    os.path.basename(data[0]))[0])
                 selected_view_num = int(len(data) / 2)
 
                 for view in range(min(self.view_num, selected_view_num)):
@@ -98,7 +101,7 @@ class MVSGenerator:
                         images.append(image)
                         cams.append(cam)
 
-                # determine a proper scale to resize input 
+                # determine a proper scale to resize input
                 h_scale = float(FLAGS.max_h) / images[0].shape[0]
                 w_scale = float(FLAGS.max_w) / images[0].shape[1]
                 if h_scale > 1 or w_scale > 1:
@@ -107,10 +110,12 @@ class MVSGenerator:
                 resize_scale = h_scale
                 if w_scale > h_scale:
                     resize_scale = w_scale
-                scaled_input_images, scaled_input_cams = scale_mvs_input(images, cams, scale=resize_scale)
+                scaled_input_images, scaled_input_cams = scale_mvs_input(
+                    images, cams, scale=resize_scale)
 
                 # crop to fit network
-                croped_images, croped_cams = crop_mvs_input(scaled_input_images, scaled_input_cams)
+                croped_images, croped_cams = crop_mvs_input(
+                    scaled_input_images, scaled_input_cams)
                 image_shape = croped_images[0].shape
 
                 # center images
@@ -119,18 +124,21 @@ class MVSGenerator:
                     centered_images.append(center_image(croped_images[view]))
 
                 # sample cameras for building cost volume
-                real_cams = np.copy(croped_cams) 
-                scaled_cams = scale_mvs_camera(croped_cams, scale=FLAGS.sample_scale)
+                real_cams = np.copy(croped_cams)
+                scaled_cams = scale_mvs_camera(
+                    croped_cams, scale=FLAGS.sample_scale)
 
                 # return mvs input
                 scaled_images = []
                 for view in range(self.view_num):
-                    scaled_images.append(scale_image(croped_images[view], scale=FLAGS.sample_scale))
+                    scaled_images.append(scale_image(
+                        croped_images[view], scale=FLAGS.sample_scale))
                 scaled_images = np.stack(scaled_images, axis=0)
                 croped_images = np.stack(croped_images, axis=0)
                 scaled_cams = np.stack(scaled_cams, axis=0)
                 self.counter += 1
-                yield (scaled_images, centered_images, scaled_cams, real_cams, image_index) 
+                yield (scaled_images, centered_images, scaled_cams, real_cams, image_index)
+
 
 def mvsnet_pipeline(mvs_list):
     """ mvsnet in altizure pipeline """
@@ -143,18 +151,22 @@ def mvsnet_pipeline(mvs_list):
 
     # Training generator
     mvs_generator = iter(MVSGenerator(mvs_list, FLAGS.view_num))
-    generator_data_type = (tf.float32, tf.float32, tf.float32, tf.float32, tf.int32)
-    mvs_set = tf.data.Dataset.from_generator(lambda: mvs_generator, generator_data_type)
+    generator_data_type = (tf.float32, tf.float32,
+                           tf.float32, tf.float32, tf.int32)
+    mvs_set = tf.data.Dataset.from_generator(
+        lambda: mvs_generator, generator_data_type)
     mvs_set = mvs_set.batch(FLAGS.batch_size)
     mvs_set = mvs_set.prefetch(buffer_size=1)
-    
+
     # iterators
     mvs_iterator = mvs_set.make_initializable_iterator()
-    
+
     # data
     croped_images, centered_images, scaled_cams, croped_cams, image_index = mvs_iterator.get_next()
-    croped_images.set_shape(tf.TensorShape([None, FLAGS.view_num, None, None, 3]))
-    centered_images.set_shape(tf.TensorShape([None, FLAGS.view_num, None, None, 3]))
+    croped_images.set_shape(tf.TensorShape(
+        [None, FLAGS.view_num, None, None, 3]))
+    centered_images.set_shape(tf.TensorShape(
+        [None, FLAGS.view_num, None, None, 3]))
     scaled_cams.set_shape(tf.TensorShape([None, FLAGS.view_num, 2, 4, 4]))
     depth_start = tf.reshape(
         tf.slice(scaled_cams, [0, 0, 1, 3, 0], [FLAGS.batch_size, 1, 1, 1, 1]), [FLAGS.batch_size])
@@ -165,10 +177,12 @@ def mvsnet_pipeline(mvs_list):
     init_depth_map, prob_map = inference_mem(
         centered_images, scaled_cams, FLAGS.max_d, depth_start, depth_interval)
 
-    # refinement 
-    ref_image = tf.squeeze(tf.slice(centered_images, [0, 0, 0, 0, 0], [-1, 1, -1, -1, 3]), axis=1)
-    depth_map = depth_refine(init_depth_map, ref_image, FLAGS.max_d, depth_start, depth_interval)
-                                            
+    # refinement
+    ref_image = tf.squeeze(
+        tf.slice(centered_images, [0, 0, 0, 0, 0], [-1, 1, -1, -1, 3]), axis=1)
+    depth_map = depth_refine(init_depth_map, ref_image,
+                             FLAGS.max_d, depth_start, depth_interval)
+
     # init option
     init_op = tf.global_variables_initializer()
     var_init_op = tf.local_variables_initializer()
@@ -176,7 +190,7 @@ def mvsnet_pipeline(mvs_list):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
 
-    with tf.Session(config=config) as sess:   
+    with tf.Session(config=config) as sess:
 
         # initialization
         sess.run(var_init_op)
@@ -191,7 +205,7 @@ def mvsnet_pipeline(mvs_list):
             print(Notify.INFO, 'Pre-trained model restored from %s' %
                   ('-'.join([FLAGS.pretrained_model_ckpt_path, str(FLAGS.ckpt_step)])), Notify.ENDC)
             total_step = FLAGS.ckpt_step
-    
+
         # run inference for each reference view
         sess.run(mvs_iterator.initializer)
         for step in range(len(mvs_list)):
@@ -204,7 +218,7 @@ def mvsnet_pipeline(mvs_list):
                 print("all dense finished")  # ==> "End of dataset"
                 break
             duration = time.time() - start_time
-            print(Notify.INFO, 'depth inference %d finished. (%.3f sec/step)' % (step, duration), 
+            print(Notify.INFO, 'depth inference %d finished. (%.3f sec/step)' % (step, duration),
                   Notify.ENDC)
 
             # squeeze output
@@ -219,7 +233,8 @@ def mvsnet_pipeline(mvs_list):
 
             # paths
             depth_map_path = output_folder + ('/%08d.pfm' % out_index)
-            init_depth_map_path = output_folder + ('/%08d_init.pfm' % out_index)
+            init_depth_map_path = output_folder + \
+                ('/%08d_init.pfm' % out_index)
             prob_map_path = output_folder + ('/%08d_prob.pfm' % out_index)
             out_ref_image_path = output_folder + ('/%08d.jpg' % out_index)
             out_ref_cam_path = output_folder + ('/%08d.txt' % out_index)
