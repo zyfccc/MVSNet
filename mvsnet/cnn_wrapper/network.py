@@ -87,6 +87,10 @@ class Network(object):
         assert args
         self.terminals = []
         for fed_layer in args:
+            try:
+                basestring
+            except NameError:
+                basestring = str
             if isinstance(fed_layer, basestring):
                 try:
                     fed_layer = self.layers[fed_layer]
@@ -360,7 +364,8 @@ class Network(object):
                   'reuse': self.reuse}
         with tf.variable_scope(name):
             if mode not in ['gaussian', 'embedded', 'dot']:
-                raise ValueError('mode must be one of gaussian, embedded, dot or concatenate')
+                raise ValueError(
+                    'mode must be one of gaussian, embedded, dot or concatenate')
 
             with tf.variable_scope('theta'):
                 # theta path
@@ -387,7 +392,7 @@ class Network(object):
                 # g path
                 g = tf.layers.conv3d(input, **kwargs)
                 g = tf.reshape(g, [-1, int_channels])
-        
+
             with tf.variable_scope('y'):
                 # output path
                 y = tf.matmul(f, g)
